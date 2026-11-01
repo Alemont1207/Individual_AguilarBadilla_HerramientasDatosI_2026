@@ -1,0 +1,7 @@
+escenario,q.NS,q.EO,n.NS,n.EO,fuente
+MOPT AM (07:30-08:30),298,955,2,2,MOPT 2023
+MOPT PM (16:30-17:30),384,699,2,2,MOPT 2023
+Flujo bajo,300,250,2,2,Simulado
+Flujo equilibrado,800,800,2,2,Simulado
+Predominio Norte-Sur,1300,400,2,2,Simulado
+Alta demanda,1200,1000,2,2,Simulado
