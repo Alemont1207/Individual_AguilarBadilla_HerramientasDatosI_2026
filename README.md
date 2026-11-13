@@ -78,9 +78,4 @@ Abre el proyecto (`.Rproj`) en RStudio, de modo que la carpeta de trabajo sea la
 - Modelo simplificado: dos fases, sin peatones, giros por separado, accidentes ni coordinación con otras intersecciones.
 - Los datos reales son de un solo cruce y de horas pico, y solo cuentan los vehículos que lograron cruzar.
 - Los parámetros (flujo de saturación de 1 800 veh/h por carril, 8 s de transición) son valores típicos, no calibrados con datos locales.
-- El modelo compara formas de repartir el verde; **no** decide si conviene instalar un semáforo (el MOPT concluyó que en ese cruce no conviene).
 
-## Convención de commits
-
-Se usan los prefijos indicados en el curso: `feat`, `fix`, `docs`, `style`, `refactor`, `test`, `perf`, `chore`,
-`build`/`ci` y `revert`. Ejemplo: `docs: agrega README de la carpeta cod`.
