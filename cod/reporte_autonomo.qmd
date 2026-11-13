@@ -1,6 +1,6 @@
 ---
 title: "Optimización de los tiempos semafóricos para la reducción de la congestión vehicular mediante R"
-subtitle: "Reporte de proyecto"
+subtitle: "Proyecto individual · Herramientas de Datos I"
 author: "Alessia Aguilar Badilla"
 date: "2026-10-19"
 date-format: "D [de] MMMM [de] YYYY"
@@ -21,7 +21,7 @@ format:
         \pagestyle{fancy}
         \fancyhf{}
         \lhead{\small Optimización de tiempos semafóricos con R}
-        \rhead{\small Reporte de proyecto}
+        \rhead{\small Proyecto individual}
         \cfoot{\small \thepage}
         \renewcommand{\headrulewidth}{0.4pt}
         \setlength{\headheight}{15pt}
@@ -38,69 +38,76 @@ execute:
 ```{r}
 #| label: setup
 #| include: false
+# ---- Datos de entrada (escenarios) ----
 esc <- read.csv(text = "escenario,q.NS,q.EO,n.NS,n.EO,fuente\nMOPT AM (07:30-08:30),298,955,2,2,MOPT 2023 (real)\nMOPT PM (16:30-17:30),384,699,2,2,MOPT 2023 (real)\nFlujo bajo,300,250,2,2,Simulado\nFlujo equilibrado,800,800,2,2,Simulado\nPredominio Norte-Sur,1300,400,2,2,Simulado\nAlta demanda,1200,1000,2,2,Simulado", stringsAsFactors = FALSE)
+
+# ---- Resultados del modelo (optimizado, Webster y equitativo) ----
 res <- read.csv(text = "\"escenario\",\"q.NS\",\"q.EO\",\"g.NS.opt\",\"g.EO.opt\",\"C.opt\",\"W.opt\",\"g.NS.web\",\"g.EO.web\",\"W.webster\",\"W.equitativo\",\"mejora.vs.equit.pct\",\"no.atendidos.opt\"\n\"MOPT AM (07:30-08:30)\",298,955,10,21,39,7.70223405113316,10,14,7.98011936446488,14.3383740624244,46.2823747127795,4.15\n\"MOPT PM (16:30-17:30)\",384,699,10,14,32,7.58745061584941,10,10,7.56569834998838,13.0761794097142,41.9750190165426,2.7\n\"Flujo bajo\",300,250,10,10,28,6.68110775980258,10,10,6.68110775980258,11.7170276939951,42.97950014041,0.8\n\"Flujo equilibrado\",800,800,10,10,28,8.53270148129551,11,12,8.84493472257093,14.1638840070299,39.7573329669989,4.25\n\"Predominio Norte-Sur\",1300,400,26,10,44,8.59525905063662,19,10,8.91858827671185,17.1096051164701,49.7635451424731,4.6\n\"Alta demanda\",1200,1000,17,14,39,12.1744517069394,19,17,12.5931130292195,16.2434125122412,25.0499136325908,6", stringsAsFactors = FALSE)
 
-corto <- function(x) sub(" \\(.*\\)", "", x)
-env <- function(x) gsub(" ", "\n", x, fixed = TRUE)
+# ---- Funciones auxiliares ----
+corto <- function(x) sub(" \\(.*\\)", "", x)         # quita el horario del nombre
+env   <- function(x) gsub(" ", "\n", x, fixed = TRUE) # etiquetas de eje en varias líneas
 esc$corto <- corto(esc$escenario)
 res$corto <- corto(res$escenario)
 
+# Carga de la intersección (razón de flujo de Webster): Y = y.NS + y.EO
 s <- 1800
 esc$y.NS <- esc$q.NS / (s * esc$n.NS)
 esc$y.EO <- esc$q.EO / (s * esc$n.EO)
 esc$Y    <- esc$y.NS + esc$y.EO
 
-tabla_tex <- function(df, align) {
+# Tabla en LaTeX con número, título (arriba) y fuente (abajo)
+tabla_tex <- function(df, align, num, titulo, fuente) {
   x <- knitr::kable(df, format = "latex", booktabs = TRUE, align = align, linesep = "")
-  cat("\\begin{center}\\small\\setlength{\\tabcolsep}{5pt}", x, "\\end{center}\n", sep = "\n")
+  cat("\\noindent{\\small\\textbf{Tabla ", num, ".} ", titulo, "}\\par\\vspace{-2pt}\n", sep = "")
+  cat("\\begin{center}\\small\\setlength{\\tabcolsep}{5pt}\n", x, "\n\\end{center}\n", sep = "")
+  cat("\\vspace{-8pt}\\noindent{\\footnotesize\\textit{Fuente:} ", fuente, "}\\par\\vspace{6pt}\n", sep = "")
 }
+
+# Formato de números con coma decimal
 f1 <- function(x) format(round(x, 1), decimal.mark = ",", nsmall = 1)
 f2 <- function(x) format(round(x, 2), decimal.mark = ",", nsmall = 2)
 f0 <- function(x) format(round(x), big.mark = " ", decimal.mark = ",")
 
-am <- res[grepl("AM", res$corto), ]
-pm <- res[grepl("PM", res$corto), ]
+# ---- Valores que se citan en el texto ----
+am    <- res[grepl("AM", res$corto), ]
+pm    <- res[grepl("PM", res$corto), ]
+eq    <- res[res$corto == "Flujo equilibrado", ]
+ns    <- res[res$corto == "Predominio Norte-Sur", ]
+alta  <- res[res$corto == "Alta demanda", ]
 prop_am <- 955 / (955 + 298)
 prop_pm <- 699 / (699 + 384)
 mej_min <- min(res$mejora.vs.equit.pct)
 mej_max <- max(res$mejora.vs.equit.pct)
 dif_web <- max(abs(res$W.webster - res$W.opt))
+L        <- 8                      # transición entre fases (s)
+C_eq     <- 2 * 30 + L             # ciclo del reparto equitativo (s)
+n_min    <- sum(res$g.NS.opt == 10 | res$g.EO.opt == 10)
 ```
-
-# Objetivo
-
-Desarrollar un modelo computacional en R que permita optimizar la distribución de los tiempos de luz verde de una intersección con semáforo, considerando diferentes condiciones de flujo vehicular, con el propósito de minimizar el tiempo promedio de espera de los vehículos.
 
 # Introducción
 
-La congestión vehicular es un problema importante para Costa Rica, especialmente en la Gran Área Metropolitana. Según el Traffic Index 2025 de Numbeo, San José tuvo un índice de tráfico de 327,8 y un tiempo promedio de desplazamiento de 63,3 minutos; además, la OCDE (2023) estima que la congestión en la región cuesta cerca del 3,8 % del producto interno bruto.
+La congestión vehicular es uno de los problemas de movilidad más visibles de Costa Rica, en particular en la Gran Área Metropolitana. Según el Traffic Index 2025 de Numbeo (2025), San José registró un índice de tráfico de 327,8 y un tiempo promedio de desplazamiento de 63,3 minutos, mientras que la Organización para la Cooperación y el Desarrollo Económicos [OCDE] (2023) estima que la congestión en la región cuesta cerca del 3,8 % del producto interno bruto. Más allá de la molestia para quienes conducen, esto significa horas productivas perdidas y costos económicos para todo el país.
 
-Una forma de aprovechar mejor las calles existentes es ajustar cuánto tiempo de luz verde recibe cada dirección de una intersección según el tránsito que tiene. Este reporte responde la pregunta: **¿cómo pueden optimizarse los tiempos de luz verde de una intersección, según el flujo vehicular, para minimizar el tiempo promedio de espera de los vehículos?**
+Como ampliar la red vial no siempre es posible ni inmediato, resulta relevante preguntarse cuánto se puede mejorar con la infraestructura que ya existe. Una alternativa es ajustar cuánto tiempo de luz verde recibe cada dirección de una intersección según el tránsito que realmente tiene, pues repartir el mismo tiempo entre calles con demandas distintas puede generar esperas innecesarias. Este reporte estudia ese problema en la intersección de la Ruta Nacional 124 con la Ruta Nacional 122, en San Antonio de Alajuela, a partir del informe del Ministerio de Obras Públicas y Transportes [MOPT] (2023), y busca responder: **¿cómo pueden optimizarse los tiempos de luz verde de una intersección, según el flujo vehicular, para minimizar el tiempo promedio de espera de los vehículos?**
 
-# Datos e insumos
+# Objetivo
 
-**Fuente real.** Informe MOPT-03-05-01-0587-2023 de la Dirección General de Ingeniería de Tránsito del MOPT (noviembre de 2023), sobre la intersección de la Ruta Nacional 124 con la Ruta Nacional 122 en San Antonio de Alajuela. Los conteos se hicieron manualmente el 29, 30 y 31 de agosto, el 1 de setiembre y el 4 y 5 de octubre de 2023, de 6:30 a 9:00 y de 16:30 a 18:30. Las horas de mayor tránsito fueron de 7:30 a 8:30 (mañana, "AM") y de 16:30 a 17:30 (tarde, "PM").
-
-**Variables usadas.** El informe trae el número de vehículos por hora en cada acceso (Este, Oeste, Norte y Sur) y por movimiento (izquierda, directo y derecha). La Ruta 124 es la calle principal (Este-Oeste, un carril por sentido) y la Ruta 122 la secundaria (Norte-Sur). Para el modelo sumé los movimientos y los dos accesos de cada calle, obteniendo el flujo Norte-Sur (`q.NS`) y Este-Oeste (`q.EO`) en vehículos por hora, y asumí dos carriles por fase (uno por acceso). Los totales coinciden con los del propio informe (955 y 699 veh/h en la calle principal).
-
-**Escenarios simulados.** Para ver cómo responde el modelo en otras condiciones, agregué cuatro escenarios con valores de referencia propios (no oficiales): flujo bajo, flujo equilibrado, predominio Norte-Sur y alta demanda.
-
-**Supuestos fijos del modelo.** Capacidad de 1 800 veh/h por carril cuando hay luz verde; 8 s de transición entre fases por ciclo; verde entre 10 y 90 s por fase; ciclo máximo de 150 s. *Limitación:* según el informe, los conteos solo incluyen los vehículos que lograron cruzar, por lo que la demanda real podría ser mayor.
+Desarrollar un modelo computacional en R que optimice la distribución de los tiempos de luz verde de una intersección con semáforo, bajo diferentes condiciones de flujo vehicular, para minimizar el tiempo promedio de espera de los vehículos.
 
 # Metodología
 
-1. **Modelo de la intersección.** Dos fases: mientras una dirección tiene luz verde, la otra espera. El ciclo dura $C = g_{NS} + g_{EO} + L$, donde $g_{NS}$ y $g_{EO}$ son los segundos de verde de cada dirección y $L$ el tiempo de transición.
-2. **Simulación.** Se simula una hora, segundo a segundo. Los vehículos llegan al azar según el flujo de cada dirección; con luz verde salen al ritmo de la capacidad y el resto forma fila (el primero en llegar es el primero en salir). La espera de cada vehículo es el tiempo entre que llega y que sale.
-3. **Indicador.** El tiempo promedio de espera $W = \frac{1}{n}\sum_{i=1}^{n} w_i$, donde $w_i$ es la espera del vehículo $i$ y $n$ el total de vehículos.
-4. **Optimización.** Se prueban muchas combinaciones de $g_{NS}$ y $g_{EO}$ (primero cada 5 s y luego cada 1 s cerca de la mejor) y se escoge la que da el menor $W$. Cada combinación se evalúa con 20 repeticiones de la simulación para reducir el efecto del azar.
-5. **Validación y comparación.** La combinación elegida se vuelve a evaluar con llegadas nuevas y se compara con un reparto equitativo (30 s y 30 s) y con la fórmula de Webster, un método clásico de ingeniería de tránsito.
+Los datos reales provienen del informe MOPT-03-05-01-0587-2023 de la Dirección General de Ingeniería de Tránsito (MOPT, 2023), que contiene conteos manuales realizados el 29, 30 y 31 de agosto, el 1 de setiembre y el 4 y 5 de octubre de 2023, de 6:30 a 9:00 y de 16:30 a 18:30. Se seleccionaron las dos horas de mayor tránsito: de 7:30 a 8:30 (mañana, "AM") y de 16:30 a 17:30 (tarde, "PM"). Como el informe presenta los vehículos por hora en cada acceso (Este, Oeste, Norte y Sur) y por movimiento (izquierda, directo y derecha), se sumaron los movimientos y los dos accesos de cada calle para obtener el flujo Norte-Sur ($q_{NS}$, Ruta 122) y Este-Oeste ($q_{EO}$, Ruta 124), en vehículos por hora, asumiendo dos carriles por fase. Los totales coinciden con los del informe (955 y 699 veh/h en la calle principal). Para observar cómo responde el modelo en otras condiciones, se agregaron cuatro escenarios simulados con valores de referencia propios, no oficiales: flujo bajo, flujo equilibrado, predominio Norte-Sur y alta demanda.
+
+La intersección se representó con dos fases: mientras una dirección tiene luz verde, la otra espera. El ciclo dura $C = g_{NS} + g_{EO} + L$, donde $g_{NS}$ y $g_{EO}$ son los segundos de verde de cada dirección y $L = 8$ s es el tiempo de transición. Se simula una hora segundo a segundo: los vehículos llegan al azar según una distribución de Poisson, de modo que, aunque se conozca el flujo promedio, no llegan a intervalos fijos. Quienes encuentran luz roja forman una fila en la que el primero en llegar es el primero en salir, y con luz verde los vehículos salen a una capacidad de 1 800 veh/h por carril. La espera $w_i$ de cada vehículo es el tiempo entre su llegada y su salida, y el indicador del modelo es el tiempo promedio de espera, $W = \frac{1}{n}\sum_{i=1}^{n} w_i$, con $n$ el total de vehículos atendidos. Además, se calculó la carga de la intersección $Y = \frac{q_{NS}}{1\,800\,n_{NS}} + \frac{q_{EO}}{1\,800\,n_{EO}}$, que resume qué tan cerca está de su capacidad (Webster, 1958).
+
+La optimización consiste en encontrar los valores de $g_{NS}$ y $g_{EO}$ que minimizan $W$, con un verde de entre 10 y 90 s por dirección y un ciclo máximo de 150 s. Primero se prueban combinaciones cada 5 s y luego cada 1 s alrededor de la mejor; cada combinación se evalúa con 20 repeticiones de la simulación para reducir el efecto del azar, y la elegida se vuelve a evaluar con llegadas nuevas. Por último, el resultado se compara con un reparto equitativo (30 s y 30 s) y con la fórmula de Webster (1958), un método clásico de ingeniería de tránsito. Todo el proceso se implementó en R y se acompañó de una aplicación interactiva en Shiny para explorar los escenarios.
 
 # Resultados
 
-## Análisis exploratorio de datos
+## Análisis exploratorio de los flujos
 
-**Tabla 1.** Flujo vehicular por escenario y nivel de carga de la intersección.
+La Tabla 1 resume el flujo vehicular de cada escenario junto con la carga $Y$, donde valores cercanos a 1 indican que casi no queda capacidad disponible, y la @fig-flujos muestra visualmente cómo se reparte el tránsito entre las dos direcciones.
 
 ```{r}
 #| label: tabla-aed
@@ -112,32 +119,30 @@ t1 <- data.frame(
   `Carga Y` = f2(esc$Y),
   check.names = FALSE
 )
-tabla_tex(t1, "lrrr")
+tabla_tex(t1, "lrrr", 1,
+          "Flujo vehicular por escenario y nivel de carga de la intersección.",
+          "elaboración propia con datos de MOPT (2023) para los escenarios reales y valores de referencia propios para los simulados.")
 ```
 
 ```{r}
 #| label: fig-flujos
-#| fig-cap: "Flujo vehicular por dirección en cada escenario."
-#| fig-height: 2.4
+#| fig-cap: "Flujo vehicular por dirección en cada escenario. Fuente: elaboración propia con datos de MOPT (2023) y escenarios simulados."
+#| fig-height: 2.3
 #| fig-width: 6.6
 par(mar = c(4, 4.8, 1, 1), las = 1)
 m <- rbind(esc$q.NS, esc$q.EO)
-mp <- barplot(m, beside = TRUE, names.arg = env(esc$corto), cex.names = 0.85,
-              col = c("steelblue", "tomato"), ylab = "Flujo (veh/h)",
-              ylim = c(0, max(m) * 1.25))
+barplot(m, beside = TRUE, names.arg = env(esc$corto), cex.names = 0.85,
+        col = c("steelblue", "tomato"), ylab = "Flujo (veh/h)",
+        ylim = c(0, max(m) * 1.25))
 legend("top", legend = c("Norte-Sur", "Este-Oeste"),
        fill = c("steelblue", "tomato"), horiz = TRUE, bty = "n", cex = 0.85)
 ```
 
-La carga $Y$ resume qué tan llena está la intersección: valores cercanos a 1 indican que casi no queda capacidad. Lo más importante es:
+La @fig-flujos deja ver que las dos calles rara vez necesitan lo mismo. En los datos reales del MOPT, la calle principal (Este-Oeste) concentra el `r f0(prop_am*100)` % del tránsito en la mañana (955 contra 298 veh/h) y el `r f0(prop_pm*100)` % en la tarde (699 contra 384 veh/h), por lo que asignar tiempos de verde iguales desaprovecharía parte del tiempo en la dirección con menos demanda. Los escenarios simulados amplían el panorama con flujos bajos, flujos iguales (`r f0(esc$q.NS[4])` veh/h en cada dirección), predominio de la calle secundaria (`r f0(esc$q.NS[5])` contra `r f0(esc$q.EO[5])` veh/h) y alta demanda. La Tabla 1 también muestra que ningún escenario se acerca a la saturación: la carga máxima es `r f2(max(esc$Y))` y en los datos reales es de `r f2(esc$Y[1])` y `r f2(esc$Y[2])`. Por lo tanto, el reto en esta intersección no es la falta de capacidad, sino repartir mejor el tiempo disponible. Cabe señalar que, en la mañana, casi todo el tránsito Norte-Sur (256 de 298 veh/h) entra por el acceso sur, un detalle que un modelo de dos fases no distingue.
 
-- En los datos reales del MOPT, la calle principal (Este-Oeste) lleva `r f0(prop_am*100)` % del tránsito en la mañana y `r f0(prop_pm*100)` % en la tarde. Es decir, las dos calles **no** necesitan el mismo tiempo de verde.
-- Ningún escenario se acerca a la saturación (la carga máxima es `r f2(max(esc$Y))`, y en los datos reales `r f2(esc$Y[1])` y `r f2(esc$Y[2])`). El reto no es falta de capacidad sino repartir bien el tiempo.
-- En la mañana, casi todo el tránsito Norte-Sur (256 de 298 veh/h) entra por el acceso sur, lo que un modelo de dos fases no distingue.
+## Configuración óptima y tiempos de espera
 
-## Resultados del modelo
-
-**Tabla 2.** Configuración óptima y tiempo promedio de espera W (segundos por vehículo).
+La Tabla 2 presenta, para cada escenario, los segundos de verde recomendados por el modelo, la duración del ciclo y el tiempo promedio de espera $W$ comparado con el reparto equitativo.
 
 ```{r}
 #| label: tabla-res
@@ -152,13 +157,17 @@ t2 <- data.frame(
   `Mejora (%)` = f0(res$mejora.vs.equit.pct),
   check.names = FALSE
 )
-tabla_tex(t2, "lrrrrrr")
+tabla_tex(t2, "lrrrrrr", 2,
+          "Configuración óptima y tiempo promedio de espera W (segundos por vehículo).",
+          "elaboración propia a partir de los resultados del modelo de simulación en R.")
 ```
+
+En la hora pico de la mañana, el modelo recomienda `r am$g.NS.opt` s de verde para Norte-Sur y `r am$g.EO.opt` s para Este-Oeste, con un ciclo de `r am$C.opt` s que incluye los 8 s de transición. Con ese reparto, la espera promedio baja de `r f1(am$W.equitativo)` a `r f1(am$W.opt)` segundos por vehículo, una reducción del `r f0(am$mejora.vs.equit.pct)` %; en la tarde baja de `r f1(pm$W.equitativo)` a `r f1(pm$W.opt)` segundos, es decir, `r f0(pm$mejora.vs.equit.pct)` %. En los seis escenarios la mejora frente al reparto equitativo se ubica entre `r f0(mej_min)` % y `r f0(mej_max)` %. Además, el verde sigue al tránsito: la dirección con más vehículos recibe más segundos (`r ns$g.NS.opt` s contra `r ns$g.EO.opt` s en predominio Norte-Sur) y, cuando los flujos son iguales, los tiempos también lo son. Sin embargo, el escenario de flujo equilibrado revela un matiz importante: aun con verdes iguales (`r eq$g.NS.opt` s y `r eq$g.EO.opt` s), la espera baja de `r f1(eq$W.equitativo)` a `r f1(eq$W.opt)` segundos (`r f0(eq$mejora.vs.equit.pct)` %). Esto indica que una parte considerable de la mejora no proviene de repartir el tiempo de forma desigual, sino de acortar el ciclo, ya que el reparto de 30 s y 30 s produce ciclos de `r C_eq` s en los que los vehículos que llegan en rojo esperan más. En otras palabras, el modelo reduce la espera por dos vías: ajusta el verde al flujo de cada dirección y usa ciclos más cortos.
 
 ```{r}
 #| label: fig-comp
-#| fig-cap: "Tiempo promedio de espera según la forma de repartir el verde (menor es mejor)."
-#| fig-height: 2.4
+#| fig-cap: "Tiempo promedio de espera según la forma de repartir el verde (menor es mejor). Fuente: elaboración propia a partir de los resultados del modelo en R."
+#| fig-height: 2.3
 #| fig-width: 6.6
 par(mar = c(4, 4.8, 1, 1), las = 1)
 m <- rbind(res$W.equitativo, res$W.webster, res$W.opt)
@@ -169,34 +178,36 @@ legend("top", legend = c("Equitativo (30 s / 30 s)", "Webster", "Optimizado"),
        fill = cols, horiz = TRUE, bty = "n", cex = 0.8)
 ```
 
-```{r}
-#| label: fig-verde
-#| fig-cap: "Segundos de verde recomendados para cada dirección."
-#| fig-height: 2.3
-#| fig-width: 6.6
-par(mar = c(4, 4.8, 1, 1), las = 1)
-m <- rbind(res$g.NS.opt, res$g.EO.opt)
-barplot(m, beside = TRUE, names.arg = env(res$corto), cex.names = 0.85,
-        col = c("steelblue", "tomato"), ylab = "Verde (s)",
-        ylim = c(0, max(m) * 1.3))
-legend("top", legend = c("Norte-Sur", "Este-Oeste"),
-       fill = c("steelblue", "tomato"), horiz = TRUE, bty = "n", cex = 0.85)
-```
+La @fig-comp compara los tres métodos de reparto. En todos los escenarios el reparto equitativo (gris) es el que produce la mayor espera, mientras que Webster y el plan optimizado quedan prácticamente a la misma altura, con una diferencia máxima de `r f1(dif_web)` s por vehículo. Este resultado respalda la coherencia del modelo, pues un método clásico de ingeniería de tránsito llega a esperas equivalentes por un camino distinto. No obstante, no puede afirmarse que el modelo supere a Webster: en la tarde, por ejemplo, Webster resulta marginalmente mejor (`r f2(pm$W.webster)` contra `r f2(pm$W.opt)` s). Incluso en la mañana, Webster propone `r am$g.EO.web` s para Este-Oeste y el modelo `r am$g.EO.opt` s, con esperas casi iguales (`r f1(am$W.webster)` y `r f1(am$W.opt)` s), lo que sugiere que $W$ cambia poco cerca del óptimo y que varias combinaciones son prácticamente equivalentes (los verdes de Webster se detallan en la Tabla 3 del Anexo). Por último, la figura muestra que la ganancia disminuye cuando crece la demanda: en alta demanda la mejora es de solo `r f0(alta$mejora.vs.equit.pct)` %, porque hay menos margen para reorganizar el tiempo y la espera óptima es la más alta de todos los escenarios (`r f1(alta$W.opt)` s).
 
-**Qué significan estos resultados:**
+## Respuesta al objetivo y limitaciones
 
-- **Repartir el verde según el flujo funciona.** Frente al reparto igual de 30 s y 30 s, el plan optimizado reduce la espera promedio entre `r f0(mej_min)` % y `r f0(mej_max)` %. Con los datos reales de la mañana, la espera baja de `r f1(am$W.equitativo)` a `r f1(am$W.opt)` segundos por vehículo, y en la tarde de `r f1(pm$W.equitativo)` a `r f1(pm$W.opt)`.
-- **El verde sigue al tránsito.** La dirección con más vehículos recibe más segundos de verde (por ejemplo, `r am$g.EO.opt` s contra `r am$g.NS.opt` s en la mañana), y cuando los flujos son iguales los tiempos también lo son.
-- **El resultado es confiable.** La fórmula clásica de Webster llega a esperas casi idénticas (diferencia máxima de `r f1(dif_web)` s), lo que respalda al modelo.
-- **Con más tránsito, la mejora es menor.** En alta demanda la ganancia es de `r f0(res$mejora.vs.equit.pct[res$corto == "Alta demanda"])` %, porque hay menos margen para mejorar.
-- **Precaución.** En cuatro escenarios el verde óptimo quedó en el mínimo permitido (10 s), con ciclos cortos de `r min(res$C.opt)` a `r max(res$C.opt)` s. Esto refleja que el modelo no incluye peatones ni pérdidas al arrancar, por lo que los ciclos reales serían más largos.
+En conjunto, los resultados indican que los tiempos de verde se optimizan asignando a cada dirección un tiempo acorde con su flujo y usando ciclos cortos, lo que reduce la espera promedio de los vehículos entre `r f0(mej_min)` % y `r f0(mej_max)` % respecto a un reparto igual.
 
-**Respuesta a la pregunta del proyecto.** Los tiempos de verde se optimizan asignando a cada dirección un tiempo proporcional a su flujo y usando ciclos cortos; así se minimiza la espera promedio de los vehículos.
+En `r n_min` de los seis escenarios al menos una dirección recibió el verde mínimo permitido (10 s), con ciclos de solo `r min(res$C.opt)` a `r max(res$C.opt)` s, algo poco realista porque el modelo no incluye giros, peatones ni pérdidas de tiempo al arrancar, por lo que los ciclos reales serían más largos. A esto se suma que los conteos del MOPT solo registran los vehículos que lograron cruzar, de modo que la demanda real podría ser mayor. 
 
-# Conclusiones
+Por ello, el modelo sirve para comparar planes de tiempos semafóricos. Como siguiente paso, se recomienda incorporar más datos reales que incluyan la demanda no satisfecha, los giros y los peatones.
 
-1. Repartir la luz verde según el flujo de cada dirección reduce el tiempo promedio de espera entre `r f0(mej_min)` % y `r f0(mej_max)` % respecto a un reparto igual. En la hora pico de la mañana de San Antonio de Alajuela, la espera simulada baja de `r f1(am$W.equitativo)` a `r f1(am$W.opt)` segundos por vehículo.
-2. El modelo es una simplificación (dos fases, sin peatones ni giros) y sirve para comparar planes de tiempos, no para decidir si conviene instalar un semáforo; el MOPT concluyó que ahí no conviene. Sus resultados no son comparables con los del software Synchro del informe. Como siguientes pasos se recomiendan más datos reales que incluyan la demanda no satisfecha y la aplicación interactiva en Shiny.
 
-\small
-**Referencias.** MOPT (2023). *Análisis de intersección Ruta Nacional N.° 124 con Ruta Nacional N.° 122, San Antonio, Alajuela* (MOPT-03-05-01-0587-2023). Numbeo (2025). *Traffic index by city 2025*. OCDE (2023). *Estudios económicos de la OCDE: Costa Rica 2023*. https://doi.org/10.1787/09d84187-es
+
+# Bibliografía
+
+\begingroup
+\setlength{\parindent}{-0.8cm}
+\setlength{\leftskip}{0.8cm}
+
+Ministerio de Obras Públicas y Transportes. (2023). *Análisis de intersección Ruta Nacional N.° 124 con Ruta Nacional N.° 122, San Antonio, Alajuela* (Informe MOPT-03-05-01-0587-2023). Dirección General de Ingeniería de Tránsito.
+
+Numbeo. (2025). *Traffic index by city 2025*.
+
+Organización para la Cooperación y el Desarrollo Económicos. (2023). *Estudios económicos de la OCDE: Costa Rica 2023*. OECD Publishing. <https://doi.org/10.1787/09d84187-es>
+
+Webster, F. V. (1958). *Traffic signal settings* (Road Research Technical Paper No. 39). Her Majesty's Stationery Office.
+
+\endgroup
+
+
+# Anexos
+
+## Link del repositorio
+https://github.com/Alemont1207/Individual_AguilarBadilla_HerramientasDatosI_2026.git
